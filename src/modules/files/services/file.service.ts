@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, Logger } from '@nestjs/common';
 import {
   S3Client,
   PutObjectCommand,
@@ -23,12 +23,13 @@ import { UserResponseDto } from '../dtos/user.response.dto';
 @Injectable()
 export class FilesService implements IFileService {
   public s3Client: S3Client;
+  private readonly logger = new Logger(FilesService.name);
+
   constructor(
     @Inject('AUTH_SERVICE') private readonly authClient: ClientProxy,
     private readonly configService: ConfigService,
     private readonly prismaService: PrismaService,
   ) {
-    this.authClient.connect();
     this.s3Client = new S3Client({
       region: this.configService.get('aws.region'),
       credentials: {
@@ -36,6 +37,28 @@ export class FilesService implements IFileService {
         secretAccessKey: this.configService.get('aws.secretAccessKey'),
       },
     });
+  }
+
+  async onModuleInit() {
+    try {
+      await this.authClient.connect();
+      this.logger.log('Successfully connected to AUTH_SERVICE');
+    } catch (error) {
+      this.logger.error('Failed to connect to AUTH_SERVICE:', error);
+      // Не выбрасываем ошибку, позволяя приложению продолжить работу
+    }
+  }
+
+  async validateUser(userId: number) {
+    try {
+      const response = await firstValueFrom(
+        this.authClient.send({ cmd: 'validate_user' }, { userId })
+      );
+      return response;
+    } catch (error) {
+      this.logger.error(`Error validating user ${userId}:`, error);
+      throw new Error('Failed to validate user');
+    }
   }
 
   async createFile(
